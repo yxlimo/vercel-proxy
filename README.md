@@ -40,11 +40,40 @@
 
    配好后客户端（含 Emby / Jellyfin 的 TMDB 提供器）只填代理域名 + `/tmdb` 即可。
 
-4. 配置访问控制。**代理不做鉴权**，公开暴露前请在 Vercel WAF 里加 IP 白名单。
+4. 配置访问控制。**代理不做鉴权**，公开暴露前请在 Vercel WAF 里加访问控制。
 
    Bot Protection 会对非浏览器客户端（Emby / Jellyfin）下发 JS 挑战，
-   客户端解不开会拿到 403。可在项目 → Firewall 里加一条 custom rule，
-   用 `City` / `AS Number` / `ip_address` 条件配 `bypass` 动作放行自己的来源。
+   客户端解不开会拿到 403。可在项目 → Firewall → Configure → Add New… → Rule
+   建规则，用 `Country` / `State` / `City` / `AS Number` / `ip_address` 条件配
+   `bypass` 动作放行自己的来源。
+
+   放行全中国：
+
+   | 项 | 值 |
+   | --- | --- |
+   | Name | `allow-china` |
+   | If | `Country` `is` `CN` |
+   | Then | `Bypass` |
+
+   只放行指定省份（值是 ISO 3166-2 两字母码，如 `SH` 上海、`JS` 江苏）：
+
+   | 项 | 值 |
+   | --- | --- |
+   | Name | `allow-cn-provinces` |
+   | If | `Country` `is` `CN` **且** `State` `is one of` `SH,JS` |
+   | Then | `Bypass` |
+
+   要挡住其它来源，再加一条 `Country` `is not` `CN` → `Deny`，并排在上面那条**下面**
+   （bypass 命中后会跳过其余规则，顺序反了就不生效）。建完点 **Review Changes → Publish**。
+
+   也可以用 CLI：
+
+   ```bash
+   vercel firewall rules add "allow-china" \
+     --condition '{"type":"geo_country","op":"eq","value":"CN"}' \
+     --action bypass --project <项目名>
+   vercel firewall publish
+   ```
 
 推送到 `master` 会触发 Vercel 重新部署。
 
