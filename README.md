@@ -63,8 +63,12 @@
    | If | `Country` `is` `CN` **且** `State` `is one of` `SH,JS` |
    | Then | `Bypass` |
 
-   要挡住其它来源，再加一条 `Country` `is not` `CN` → `Deny`，并排在上面那条**下面**
-   （bypass 命中后会跳过其余规则，顺序反了就不生效）。建完点 **Review Changes → Publish**。
+   要挡住其它来源，再加一条**无条件**的 `Deny` 规则，排在上面那条**下面**
+   （bypass 命中后会跳过其余规则，顺序反了就不生效）。控制台里条件不能留空，
+   用 `Request Path` `starts with` `/` 表达「匹配所有请求」。建完点 **Review Changes → Publish**。
+
+   > **不要写成「deny 非中国」**（`Country` `is not` `CN`）。那样境内非白名单省份
+   > （如北京）两条规则都不命中，会被直接放行——只挡住了境外。要用无条件 deny。
 
    也可以用 CLI：
 
