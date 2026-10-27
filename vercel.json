@@ -13,8 +13,27 @@
             "destination": "https://image.tmdb.org/t/:type/:path*"
         },
         {
+            "source": "/pi/api/models/revisions/:path*",
+            "destination": "https://pi.dev/api/models/revisions/:path*"
+        },
+        {
             "source": "/:path*",
             "destination": "/api/tmdb.js"
+        }
+    ],
+    "headers": [
+        {
+            "source": "/pi/:path*",
+            "headers": [
+                {
+                    "key": "Access-Control-Allow-Origin",
+                    "value": "*"
+                },
+                {
+                    "key": "Cross-Origin-Resource-Policy",
+                    "value": "cross-origin"
+                }
+            ]
         }
     ]
 }

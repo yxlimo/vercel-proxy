@@ -11,6 +11,7 @@
 | --- | --- |
 | 接口代理 | `/{3\|4}/...` 透传到 `api.themoviedb.org`，路径与查询参数原样转发 |
 | 图片代理 | `/t/p/...`、`/t/{w\|o\|l\|r}/...` 转发到 `image.tmdb.org` |
+| 模型目录代理 | `/pi/api/models/revisions/sha256-<hex>` 转发到 `pi.dev`，内容寻址不可变文件，边缘缓存一年 |
 | 错误原样透传 | 上游状态码和响应体不包装，TMDB 的 `status_code` / `status_message` 保持原样，Emby / Jellyfin / TMDbHelper 可直接解析 |
 | 多方法支持 | GET / HEAD / POST / PUT / PATCH / DELETE 按原方法转发，`POST /4/auth/token`、`DELETE /4/auth/session` 等 v4 鉴权接口可用 |
 | 分层缓存 | Vercel 共享 CDN 缓存 + 进程内缓存，TTL 按数据类别分级（配置 24h / 剧集 12h / 榜单 1h / 趋势 15min），不跟随上游 |
@@ -86,7 +87,14 @@
    curl -o poster.jpg "https://<你的域名>/t/p/w500/1E5baAaEse26fej7uHcjOgEE2t2.jpg"
    ```
 
-4. **健康检查**：
+4. **模型目录**——Pi 的模型目录按内容寻址存放，路径里的 `sha256-<hex>` 就是
+   响应体内容的哈希。查询串 `types` 会改变响应体，**必须原样带上**：
+
+   ```bash
+   curl "https://<你的域名>/pi/api/models/revisions/sha256-<64位hex>?types=chat,image,classifier"
+   ```
+
+5. **健康检查**：
 
    ```bash
    curl "https://<你的域名>/health"
@@ -97,6 +105,8 @@
 - 共享 CDN 缓存由 Vercel 边缘承担，跨实例共享；进程内缓存每实例一份，冷启动即失效。
 - 免费额度每月 100GB 流量，图片请求同样计入。
 - 代理只做转发，不做鉴权与限流。公开暴露前建议在 Vercel WAF 里加访问控制。
+- 模型目录响应约 931KB，实测从国内直连 pi.dev 大响应会被截断（拿到 65KB 就断），
+  经代理由边缘缓存后读取稳定。
 
 ## 本地开发
 
@@ -105,4 +115,5 @@ pnpm install
 pnpm test
 ```
 
-测试会在本地起一个假上游，覆盖透传、错误、缓存隔离、凭据注入、超时、缓存 TTL 分级等场景。
+测试会在本地起一个假上游，覆盖透传、错误、缓存隔离、凭据注入、超时、缓存 TTL 分级等场景；
+另有路由测试校验 `vercel.json` 的 rewrite 顺序与匹配范围。
