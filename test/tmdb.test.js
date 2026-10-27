@@ -85,17 +85,18 @@ test.after(() => {
 });
 
 test('GET 请求原样透传上游响应', async () => {
-    const res = await invoke({ url: '/3/movie/550?language=zh-CN' });
+    const res = await invoke({ url: '/tmdb/3/movie/550?language=zh-CN' });
     assert.equal(res.status, 200);
     assert.match(res.headers['content-type'], /application\/json/);
     const data = JSON.parse(res.body);
     assert.equal(data.ok, true);
+    // 上游收到的是剥掉 /tmdb 前缀后的路径
     assert.equal(data.url, '/3/movie/550?language=zh-CN');
     assert.equal(res.headers['x-cache-local'], 'MISS');
 });
 
 test('上游错误状态码与错误体原样透传', async () => {
-    const res = await invoke({ url: '/3/err' });
+    const res = await invoke({ url: '/tmdb/3/err' });
     assert.equal(res.status, 401);
     const data = JSON.parse(res.body);
     assert.equal(data.status_code, 7);
@@ -104,23 +105,23 @@ test('上游错误状态码与错误体原样透传', async () => {
 });
 
 test('非 JSON 响应体原样透传', async () => {
-    const res = await invoke({ url: '/3/text' });
+    const res = await invoke({ url: '/tmdb/3/text' });
     assert.equal(res.status, 200);
     assert.match(res.headers['content-type'], /text\/plain/);
     assert.equal(res.body, 'plain text body');
 });
 
 test('相同请求命中缓存', async () => {
-    const first = await invoke({ url: '/3/cache-me' });
-    const second = await invoke({ url: '/3/cache-me' });
+    const first = await invoke({ url: '/tmdb/3/cache-me' });
+    const second = await invoke({ url: '/tmdb/3/cache-me' });
     assert.equal(first.headers['x-cache-local'], 'MISS');
     assert.equal(second.headers['x-cache-local'], 'HIT');
     assert.equal(first.body, second.body);
 });
 
 test('不同 Authorization 不共享缓存', async () => {
-    const a = await invoke({ url: '/3/account/1/favorites', headers: { authorization: 'Bearer token-a' } });
-    const b = await invoke({ url: '/3/account/1/favorites', headers: { authorization: 'Bearer token-b' } });
+    const a = await invoke({ url: '/tmdb/3/account/1/favorites', headers: { authorization: 'Bearer token-a' } });
+    const b = await invoke({ url: '/tmdb/3/account/1/favorites', headers: { authorization: 'Bearer token-b' } });
     assert.equal(a.headers['x-cache-local'], 'MISS');
     assert.equal(b.headers['x-cache-local'], 'MISS');
     assert.match(a.body, /token-a/);
@@ -130,7 +131,7 @@ test('不同 Authorization 不共享缓存', async () => {
 test('POST 请求会转发方法与请求体', async () => {
     const res = await invoke({
         method: 'POST',
-        url: '/4/auth/token',
+        url: '/tmdb/4/auth/token',
         headers: { 'content-type': 'application/json' },
         body: { username: 'demo' }
     });
@@ -142,7 +143,7 @@ test('POST 请求会转发方法与请求体', async () => {
 
 test('服务端配置 api key 后调用方无需带 key', async () => {
     process.env.TMDB_API_KEY = 'server-key';
-    const res = await invoke({ url: '/3/movie/550' });
+    const res = await invoke({ url: '/tmdb/3/movie/550' });
     const data = JSON.parse(res.body);
     assert.match(data.url, /api_key=server-key/);
     delete process.env.TMDB_API_KEY;
@@ -150,7 +151,7 @@ test('服务端配置 api key 后调用方无需带 key', async () => {
 
 test('服务端配置 bearer token 时覆盖调用方凭据', async () => {
     process.env.TMDB_BEARER_TOKEN = 'server-token';
-    const res = await invoke({ url: '/3/movie/550?api_key=client-key', headers: { authorization: 'Bearer client-token' } });
+    const res = await invoke({ url: '/tmdb/3/movie/550?api_key=client-key', headers: { authorization: 'Bearer client-token' } });
     const data = JSON.parse(res.body);
     assert.equal(data.authorization, 'Bearer server-token');
     assert.doesNotMatch(data.url, /api_key/);
@@ -159,7 +160,7 @@ test('服务端配置 bearer token 时覆盖调用方凭据', async () => {
 
 test('上游超时返回 504', async () => {
     process.env.TMDB_TIMEOUT_MS = '200';
-    const res = await invoke({ url: '/3/slow' });
+    const res = await invoke({ url: '/tmdb/3/slow' });
     assert.equal(res.status, 504);
     const data = JSON.parse(res.body);
     assert.equal(data.success, false);
@@ -178,18 +179,19 @@ test('根路径返回服务说明而非透传到上游', async () => {
     const res = await invoke({ url: '/' });
     assert.equal(res.status, 200);
     const data = JSON.parse(res.body);
-    assert.equal(data.service, 'tmdb-proxy');
+    assert.equal(data.service, 'vercel-proxy');
     assert.ok(data.endpoints.health);
+    assert.ok(data.endpoints.pi);
 });
 
 test('OPTIONS 预检直接放行', async () => {
-    const res = await invoke({ method: 'OPTIONS', url: '/3/movie/550' });
+    const res = await invoke({ method: 'OPTIONS', url: '/tmdb/3/movie/550' });
     assert.equal(res.status, 200);
     assert.equal(res.headers['access-control-allow-origin'], '*');
 });
 
 test('v3 公共接口带共享 CDN 缓存头', async () => {
-    const res = await invoke({ url: '/3/movie/550' });
+    const res = await invoke({ url: '/tmdb/3/movie/550' });
     assert.match(res.headers['vercel-cdn-cache-control'], /s-maxage=\d+/);
     assert.match(res.headers['vercel-cdn-cache-control'], /stale-while-revalidate=\d+/);
     assert.match(res.headers['cdn-cache-control'], /s-maxage=\d+/);
@@ -198,25 +200,25 @@ test('v3 公共接口带共享 CDN 缓存头', async () => {
 });
 
 test('私有接口与错误响应禁止缓存', async () => {
-    const priv = await invoke({ url: '/3/account/1/favorites' });
+    const priv = await invoke({ url: '/tmdb/3/account/1/favorites' });
     assert.match(priv.headers['cache-control'], /no-store/);
     assert.equal(priv.headers['vercel-cdn-cache-control'], undefined);
 
-    const err = await invoke({ url: '/3/err' });
+    const err = await invoke({ url: '/tmdb/3/err' });
     assert.equal(err.status, 401);
     assert.match(err.headers['cache-control'], /no-store/);
     assert.equal(err.headers['vercel-cdn-cache-control'], undefined);
 });
 
 test('v4 接口不进入共享缓存', async () => {
-    const res = await invoke({ url: '/4/movie/550', headers: { authorization: 'Bearer tok' } });
+    const res = await invoke({ url: '/tmdb/4/movie/550', headers: { authorization: 'Bearer tok' } });
     assert.equal(res.headers['vercel-cdn-cache-control'], undefined);
     assert.match(res.headers['cache-control'], /no-store/);
 });
 
 test('本地缓存命中时同样带共享缓存头', async () => {
-    const first = await invoke({ url: '/3/movie/550/local-hit-check' });
-    const second = await invoke({ url: '/3/movie/550/local-hit-check' });
+    const first = await invoke({ url: '/tmdb/3/movie/550/local-hit-check' });
+    const second = await invoke({ url: '/tmdb/3/movie/550/local-hit-check' });
     assert.equal(second.headers['x-cache-local'], 'HIT');
     // 关键：命中时也必须有 s-maxage，否则边缘永远缓存不住
     assert.match(second.headers['vercel-cdn-cache-control'], /s-maxage=\d+/);
@@ -225,8 +227,8 @@ test('本地缓存命中时同样带共享缓存头', async () => {
 
 test('客户端自带 api_key 时缓存键按 key 隔离', async () => {
     // 不同 key 的请求不能共享本地缓存条目
-    const a = await invoke({ url: '/3/movie/550/key-test?api_key=key-a' });
-    const b = await invoke({ url: '/3/movie/550/key-test?api_key=key-b' });
+    const a = await invoke({ url: '/tmdb/3/movie/550/key-test?api_key=key-a' });
+    const b = await invoke({ url: '/tmdb/3/movie/550/key-test?api_key=key-b' });
     assert.equal(a.headers['x-cache-local'], 'MISS');
     assert.equal(b.headers['x-cache-local'], 'MISS');
     // 上游确实收到了各自的 key
@@ -234,21 +236,53 @@ test('客户端自带 api_key 时缓存键按 key 隔离', async () => {
     assert.match(JSON.parse(b.body).url, /api_key=key-b/);
 
     // 相同 key 的请求命中缓存
-    const a2 = await invoke({ url: '/3/movie/550/key-test?api_key=key-a' });
+    const a2 = await invoke({ url: '/tmdb/3/movie/550/key-test?api_key=key-a' });
     assert.equal(a2.headers['x-cache-local'], 'HIT');
 });
 
 test('带 session_id 的公共路径不进缓存', async () => {
-    const res = await invoke({ url: '/3/movie/550?session_id=abc123' });
+    const res = await invoke({ url: '/tmdb/3/movie/550?session_id=abc123' });
     assert.equal(res.headers['vercel-cdn-cache-control'], undefined);
     assert.match(res.headers['cache-control'], /no-store/);
     // 同一路径再请求一次也不应命中本地缓存
-    const again = await invoke({ url: '/3/movie/550?session_id=abc123' });
+    const again = await invoke({ url: '/tmdb/3/movie/550?session_id=abc123' });
     assert.equal(again.headers['x-cache-local'], 'MISS');
 });
 
 test('append_to_response=account_states 不进缓存', async () => {
-    const res = await invoke({ url: '/3/movie/550?append_to_response=account_states' });
+    const res = await invoke({ url: '/tmdb/3/movie/550?append_to_response=account_states' });
     assert.equal(res.headers['vercel-cdn-cache-control'], undefined);
     assert.match(res.headers['cache-control'], /no-store/);
+});
+
+test('旧版无前缀路径返回 404 并提示新写法', async () => {
+    const res = await invoke({ url: '/3/movie/550' });
+    assert.equal(res.status, 404);
+    const data = JSON.parse(res.body);
+    assert.match(data.hint, /\/tmdb\/3\/movie\/550/);
+});
+
+test('非 TMDB 路径返回 404，不透传给上游', async () => {
+    const res = await invoke({ url: '/tmdb/foo/bar' });
+    assert.equal(res.status, 404);
+    const data = JSON.parse(res.body);
+    assert.equal(data.error, 'Unknown TMDB path');
+});
+
+test('带前缀的私有路径仍按私有处理', async () => {
+    // 前缀剥离后是 /3/account/...，必须仍然判定为私有，
+    // 否则 A 用户的收藏可能被缓存后返回给 B 用户。
+    const res = await invoke({ url: '/tmdb/3/account/1/favorites' });
+    assert.equal(res.headers['vercel-cdn-cache-control'], undefined);
+    assert.match(res.headers['cache-control'], /no-store/);
+});
+
+test('带前缀的路径 TTL 分类不受影响', async () => {
+    // /tmdb/3/movie/550 应归入 media 类（12 小时），
+    // 而 /tmdb/3/movie/popular 归入 list 类（1 小时）——两者不同。
+    const media = await invoke({ url: '/tmdb/3/movie/550' });
+    assert.match(media.headers['vercel-cdn-cache-control'], /s-maxage=43200/);
+
+    const list = await invoke({ url: '/tmdb/3/movie/popular' });
+    assert.match(list.headers['vercel-cdn-cache-control'], /s-maxage=3600/);
 });

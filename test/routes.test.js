@@ -71,27 +71,23 @@ test('pi.dev 的 revision 路由命中外部上游', () => {
     );
 });
 
-test('pi.dev 路由排在 TMDB 兜底路由之前', () => {
-    const piIndex = rewrites.findIndex((r) => r.source.startsWith('/pi/'));
-    const fallbackIndex = rewrites.findIndex((r) => r.source === '/:path*');
-    assert.ok(piIndex >= 0, '应当存在 pi 路由');
-    assert.ok(fallbackIndex >= 0, '应当存在 TMDB 兜底路由');
-    assert.ok(piIndex < fallbackIndex, 'pi 路由必须在兜底路由之前，否则会被吞掉');
-});
-
 test('TMDB 路由未被 pi 路由影响', () => {
     assert.equal(
-        matchRewrite('/3/movie/550').destination,
+        matchRewrite('/tmdb/3/movie/550').destination,
         '/api/tmdb.js'
     );
     assert.equal(
-        matchRewrite('/t/p/w500/poster.jpg').destination,
+        matchRewrite('/tmdb/4/movie/550').destination,
+        '/api/tmdb.js'
+    );
+    assert.equal(
+        matchRewrite('/tmdb/t/p/w500/poster.jpg').destination,
         'https://image.tmdb.org/t/p/w500/poster.jpg'
     );
 });
 
 test('pi 路由不会劫持 TMDB 的图片与接口路径', () => {
-    for (const p of ['/3/movie/550', '/4/movie/550', '/t/w780/poster.jpg', '/health']) {
+    for (const p of ['/tmdb/3/movie/550', '/tmdb/4/movie/550', '/tmdb/t/w780/poster.jpg', '/health']) {
         const matched = matchRewrite(p);
         assert.ok(matched, `${p} 应当命中 rewrite`);
         assert.ok(
@@ -126,4 +122,36 @@ test('根路径单独配规则：通配符不匹配空路径', () => {
     const matched = matchRewrite('/');
     assert.ok(matched, '根路径应当命中 rewrite');
     assert.equal(matched.destination, '/api/tmdb.js');
+});
+
+test('TMDB 图片路由排在 TMDB 接口路由之前', () => {
+    // 图片是 rewrite 到外部上游，接口是 rewrite 到函数。
+    // 顺序反了，/tmdb/t/... 会被当成接口路径送进函数。
+    const imageIndex = rewrites.findIndex((r) => r.source.startsWith('/tmdb/t/'));
+    const apiIndex = rewrites.findIndex((r) => r.source.startsWith('/tmdb/3/'));
+    assert.ok(imageIndex >= 0, '应当存在图片路由');
+    assert.ok(apiIndex >= 0, '应当存在接口路由');
+    assert.ok(imageIndex < apiIndex, '图片路由必须排在接口路由之前');
+});
+
+test('pi 路由排在 TMDB 兜底路由之前', () => {
+    const piIndex = rewrites.findIndex((r) => r.source.startsWith('/pi/'));
+    const fallbackIndex = rewrites.findIndex((r) => r.source === '/:path*');
+    assert.ok(piIndex >= 0, '应当存在 pi 路由');
+    assert.ok(fallbackIndex >= 0, '应当存在兜底路由');
+    assert.ok(piIndex < fallbackIndex, 'pi 路由必须在兜底路由之前，否则会被吞掉');
+});
+
+test('旧版无前缀的 TMDB 路径不再命中专用路由', () => {
+    // 路径前缀化之后 /3/... 与 /t/... 不再有专用规则，
+    // 只能落到兜底路由，由函数返回 404 并提示新写法。
+    for (const p of ['/3/movie/550', '/4/movie/550', '/t/p/w500/poster.jpg']) {
+        const matched = matchRewrite(p);
+        assert.ok(matched, `${p} 应当命中兜底路由`);
+        assert.equal(
+            matched.rule.source,
+            '/:path*',
+            `${p} 不该再有专用路由，实际命中 ${matched.rule.source}`
+        );
+    }
 });

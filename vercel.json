@@ -5,16 +5,28 @@
     "trailingSlash": false,
     "rewrites": [
         {
-            "source": "/t/p/:path*",
+            "source": "/tmdb/t/p/:path*",
             "destination": "https://image.tmdb.org/t/p/:path*"
         },
         {
-            "source": "/t/:type/:path*",
+            "source": "/tmdb/t/:type/:path*",
             "destination": "https://image.tmdb.org/t/:type/:path*"
+        },
+        {
+            "source": "/tmdb/3/:path*",
+            "destination": "/api/tmdb.js"
+        },
+        {
+            "source": "/tmdb/4/:path*",
+            "destination": "/api/tmdb.js"
         },
         {
             "source": "/pi/api/models/revisions/:path*",
             "destination": "https://pi.dev/api/models/revisions/:path*"
+        },
+        {
+            "source": "/health",
+            "destination": "/api/tmdb.js"
         },
         {
             "source": "/",

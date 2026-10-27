@@ -1,7 +1,7 @@
 {
-    "name": "tmdb-proxy",
+    "name": "vercel-proxy",
     "version": "1.0.0",
-    "description": "TMDB API proxy service",
+    "description": "用 Vercel 做多上游反代：TMDB API 与图片、Pi 模型目录等",
     "main": "api/tmdb.js",
     "scripts": {
         "test": "node --test"

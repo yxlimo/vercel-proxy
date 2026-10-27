@@ -28,6 +28,28 @@ function getMaxCacheSize() {
     return Number(process.env.TMDB_CACHE_MAX_SIZE || 1000);
 }
 
+// 上游路由前缀：对外是 /tmdb/3/movie/550，转到上游要还原成 /3/movie/550。
+// rewrite 到函数时 Vercel 保留原始路径，所以前缀在函数内剥离。
+const TMDB_PREFIX = '/tmdb';
+
+// TMDB 的接口只有 v3（/3/...）与 v4（/4/...）两个版本。
+// 不属于这两类的路径直接 404，避免把无关请求透传给上游换回一个费解的 401。
+const TMDB_PATH_PATTERN = /^\/(3|4)(\/|$)/;
+
+// 未加 /tmdb 前缀的旧版 TMDB 路径，用于在 404 里提示正确写法
+const LEGACY_TMDB_PATH = /^\/(3|4)(\/|$)/;
+
+/**
+ * 剥掉 /tmdb 前缀，还原成上游路径。
+ *
+ * @returns {string|null} 上游路径；不在前缀下返回 null
+ */
+function stripTmdbPrefix(pathname) {
+    if (pathname === TMDB_PREFIX) return '/';
+    if (pathname.startsWith(TMDB_PREFIX + '/')) return pathname.slice(TMDB_PREFIX.length);
+    return null;
+}
+
 // 服务端凭据：v4 read access token 优先于 v3 api key
 function getServerToken() {
     return process.env.TMDB_BEARER_TOKEN || '';
@@ -138,22 +160,7 @@ module.exports = async (req, res) => {
     }
     const pathname = parsed.pathname;
 
-    // 根路径：返回服务说明，避免直接透传到上游得到难懂的错误
-    if (pathname === '/' || pathname === '') {
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.statusCode = 200;
-        res.end(JSON.stringify({
-            service: 'tmdb-proxy',
-            endpoints: {
-                api: '/{3|4}/...',
-                image: '/t/{w|o|l|r|p}/{size}{poster_path}',
-                health: '/health'
-            }
-        }));
-        return;
-    }
-
-    // 健康检查
+    // 健康检查：服务级端点，不带任何上游前缀
     if (pathname === '/health') {
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.statusCode = 200;
@@ -176,6 +183,64 @@ module.exports = async (req, res) => {
         return;
     }
 
+    // 根路径：返回服务说明，避免直接透传到上游得到难懂的错误
+    if (pathname === '/' || pathname === '') {
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.statusCode = 200;
+        res.end(JSON.stringify({
+            service: 'vercel-proxy',
+            endpoints: {
+                tmdb: '/tmdb/{3|4}/...',
+                image: '/tmdb/t/{w|o|l|r|p}/{size}{poster_path}',
+                pi: '/pi/api/models/revisions/sha256-<hex>',
+                health: '/health'
+            }
+        }));
+        return;
+    }
+
+    // 剥掉 /tmdb 前缀，得到上游路径。
+    // 后续所有判定（私有数据、TTL 分类、缓存键）都基于上游路径，
+    // 否则 /tmdb/3/account 这类路径的私有判定会失效。
+    const upstreamPathname = stripTmdbPrefix(pathname);
+
+    if (upstreamPathname === null) {
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.statusCode = 404;
+        res.end(JSON.stringify({
+            error: 'Unknown path',
+            // 旧版路径是 /3/... 与 /4/...，现在需要加 /tmdb 前缀。
+            // 直接把新路径算出来，省掉调用方自己拼。
+            hint: LEGACY_TMDB_PATH.test(pathname)
+                ? `Use ${TMDB_PREFIX}${pathname} instead`
+                : undefined,
+            endpoints: {
+                tmdb: '/tmdb/{3|4}/...',
+                image: '/tmdb/t/{w|o|l|r|p}/{size}{poster_path}',
+                pi: '/pi/api/models/revisions/sha256-<hex>',
+                health: '/health'
+            }
+        }));
+        return;
+    }
+
+    // 非 v3/v4 的路径不属于 TMDB 接口，直接 404。
+    // 透传给上游只会换来一个「Invalid API key」的 401，掩盖真正的路径错误。
+    if (!TMDB_PATH_PATTERN.test(upstreamPathname)) {
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.statusCode = 404;
+        res.end(JSON.stringify({
+            error: 'Unknown TMDB path',
+            endpoints: {
+                api: '/tmdb/{3|4}/...',
+                image: '/tmdb/t/{w|o|l|r|p}/{size}{poster_path}',
+                pi: '/pi/api/models/revisions/sha256-<hex>',
+                health: '/health'
+            }
+        }));
+        return;
+    }
+
     // 服务端凭据优先：配置了就不需要调用方带 key
     const query = new URLSearchParams(parsed.search);
     const clientAuth = req.headers.authorization || '';
@@ -191,13 +256,13 @@ module.exports = async (req, res) => {
         query.set('api_key', serverKey);
     }
 
-    const upstreamPath = pathname + (query.toString() ? `?${query.toString()}` : '');
+    const upstreamPath = upstreamPathname + (query.toString() ? `?${query.toString()}` : '');
     const tmdbUrl = `${getUpstreamBase()}${upstreamPath}`;
 
     // 该请求是否包含用户私有数据（v4 account / watchlist / favorite / rating，
     // 以及 v3 用 session_id 附加的用户状态）
-    const isPrivate = isPrivateRequest(pathname, query);
-    const isV4 = pathname.startsWith('/4/');
+    const isPrivate = isPrivateRequest(upstreamPathname, query);
+    const isV4 = upstreamPathname.startsWith('/4/');
 
     // 缓存键：方法 + 路径 + 去掉 api_key 的查询串 + 凭据指纹
     //  - 去掉 api_key：v3 公共数据的响应与 key 无关（账号类路径已按私有排除），
@@ -208,7 +273,7 @@ module.exports = async (req, res) => {
     const credentialFingerprint = fingerprint(effectiveAuth || query.get('api_key') || '');
     const cacheKey = [
         method,
-        pathname,
+        upstreamPathname,
         cacheQuery.toString(),
         credentialFingerprint
     ].join('|');
@@ -222,7 +287,7 @@ module.exports = async (req, res) => {
             res.setHeader('X-Cache-Local', 'HIT');
             // 本地命中同样要让边缘能缓存这份内容
             applyCacheHeaders(res, {
-                pathname,
+                pathname: upstreamPathname,
                 method,
                 status: cachedData.status,
                 isV4,
@@ -270,7 +335,7 @@ module.exports = async (req, res) => {
             : Buffer.from(typeof response.data === 'string' ? response.data : JSON.stringify(response.data));
 
         // 进程内缓存：只缓存成功响应，TTL 按数据类别
-        const localTtl = getLocalTtl(pathname, method, status, isPrivate);
+        const localTtl = getLocalTtl(upstreamPathname, method, status, isPrivate);
         if (localTtl > 0) {
             pruneCache();
             cache.set(cacheKey, {
@@ -290,7 +355,7 @@ module.exports = async (req, res) => {
 
         // 共享 CDN 缓存：只有 v3 公共接口能进。
         // 命中时请求根本不进函数，直接由最近的 PoP 返回，国内延迟最低。
-        applyCacheHeaders(res, { pathname, method, status, isV4, isPrivate });
+        applyCacheHeaders(res, { pathname: upstreamPathname, method, status, isV4, isPrivate });
 
         res.statusCode = status;
         res.end(responseBody);
