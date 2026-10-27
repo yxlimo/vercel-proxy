@@ -17,6 +17,10 @@
             "destination": "https://pi.dev/api/models/revisions/:path*"
         },
         {
+            "source": "/",
+            "destination": "/api/tmdb.js"
+        },
+        {
             "source": "/:path*",
             "destination": "/api/tmdb.js"
         }

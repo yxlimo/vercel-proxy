@@ -21,13 +21,14 @@ function sourceToRegex(source) {
 
     const parts = [];
     let cursor = 0;
-    // 通配参数连同它前面的斜杠一起吸收：
-    // /:path* 匹配零段或多段，/:path 恰好匹配一段。
+    // 通配参数连同它前面的斜杠一起吸收。
+    // 关键差异：/:path* 要求至少有一段内容——Vercel 的通配符不匹配空路径，
+    // 所以 "/:path*" 匹配不到 "/"（这正是根路径需要单独规则的原因）。
     const paramPattern = /\/?:([A-Za-z_][A-Za-z0-9_]*)(\*)?/g;
     let match;
     while ((match = paramPattern.exec(source)) !== null) {
         parts.push(escape(source.slice(cursor, match.index)));
-        parts.push(match[2] ? '(?:/(.*))?' : '/([^/]+)');
+        parts.push(match[2] ? '/(.+)' : '/([^/]+)');
         cursor = match.index + match[0].length;
     }
     parts.push(escape(source.slice(cursor)));
@@ -113,4 +114,16 @@ test('pi 路由只覆盖 revisions 前缀，不会成为开放代理', () => {
             `${p} 不该被转到 pi.dev`
         );
     }
+});
+
+test('根路径单独配规则：通配符不匹配空路径', () => {
+    // /:path* 匹配不到 /，必须由独立的 "/" 规则兜住，
+    // 否则根路径会落到平台默认的 404，函数里的服务说明永远执行不到。
+    const rootRules = rewrites.filter((r) => r.source === '/');
+    assert.equal(rootRules.length, 1, '应当存在且仅存在一条根路径规则');
+    assert.equal(rootRules[0].destination, '/api/tmdb.js');
+
+    const matched = matchRewrite('/');
+    assert.ok(matched, '根路径应当命中 rewrite');
+    assert.equal(matched.destination, '/api/tmdb.js');
 });
