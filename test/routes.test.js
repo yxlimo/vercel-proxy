@@ -97,13 +97,24 @@ test('pi 路由不会劫持 TMDB 的图片与接口路径', () => {
     }
 });
 
-test('pi 路由只覆盖 revisions 前缀，不会成为开放代理', () => {
-    const matched = matchRewrite('/pi/api/models/revisions/sha256-abc');
-    assert.ok(matched);
-    assert.ok(matched.rule.destination.includes('pi.dev/api/models/revisions/'));
+test('pi.dev 的 models 列表路由命中外部上游', () => {
+    const matched = matchRewrite('/pi/api/models');
+    assert.ok(matched, '应当命中某条 rewrite');
+    assert.equal(matched.rule.destination, 'https://pi.dev/api/models');
+    assert.equal(matched.destination, 'https://pi.dev/api/models');
+});
 
-    // 上游其它路径不应被这条规则匹配到
-    for (const p of ['/pi/etc/passwd', '/pi/api/other', '/pi']) {
+test('pi 路由只覆盖 models 与 revisions，不会成为开放代理', () => {
+    const revisions = matchRewrite('/pi/api/models/revisions/sha256-abc');
+    assert.ok(revisions);
+    assert.ok(revisions.rule.destination.includes('pi.dev/api/models/revisions/'));
+
+    const models = matchRewrite('/pi/api/models');
+    assert.ok(models);
+    assert.ok(models.rule.destination.includes('pi.dev/api/models'));
+
+    // 上游其它路径不应被这些规则匹配到
+    for (const p of ['/pi/etc/passwd', '/pi/api/other', '/pi', '/pi/api']) {
         const m = matchRewrite(p);
         assert.ok(
             !m || !m.rule.destination.includes('pi.dev'),

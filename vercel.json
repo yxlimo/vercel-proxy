@@ -25,6 +25,10 @@
             "destination": "https://pi.dev/api/models/revisions/:path*"
         },
         {
+            "source": "/pi/api/models",
+            "destination": "https://pi.dev/api/models"
+        },
+        {
             "source": "/health",
             "destination": "/api/tmdb.js"
         },
